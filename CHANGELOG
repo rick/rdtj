@@ -1,0 +1,251 @@
+CHANGELOG for RDTJ (Roundeye's Duct-Tape Jukebox)
+
+See LICENSE file for license and copying information.
+
+[ times are GMT ]
+
+[ RDTJ 0.4 released ]
+
+date: 2001/09/28 05:56:06 author:roundeye
+- fixed another db busy-waiting loop bug
+
+date: 2001/09/27 20:24:30 author:roundeye
+- decreased mp3 player verbosity
+- fixed bug with non-playable files causing busy-waiting db loop
+
+date: 2001/09/27 06:39:31 author:roundeye
+- minor tweaks to random song logic after self-audit of code
+
+[ 0.4 Release Candidate 1]
+date: 2001/09/27 05:53:18 author:roundeye
+- updated README for 0.4
+- fixed minor usage string error in jukebox_player.pl
+
+date: 2001/09/27 01:52:09 author:roundeye
+- rewrote main back-end play loop
+  - fixed timing issues with random songs and MySQL
+  - streamlined
+  - set reasonable query delays
+- updated front-end color settings
+- turned off back-end debugging by default
+- dropped use of player tag in human-readable front-end UI (use only player message)
+- miscellaneous cleanup
+
+date: 2001/09/26 05:47:47 author:roundeye
+- merged vigilante code with jukebox code (we now use a fork() model)
+- added a SIGCHLD handler
+- factored database code out to RDTJ::DB
+- factored database queries out into hash structure
+  (significantly trimmed redundant db code)
+- added hack to allow RDTJ::Config to be read from PHP as well :-)
+
+date: 2001/09/23 19:54:41 author: roundeye
+- factored out Perl logging code to RDTJ::Log
+- factored out Perl configuration code to RDTJ::Config
+- factored out Perl signal handlers to RDTJ::RDTJ
+- now initialize Perl vars from RDTJ::Config values
+- updating file headers (license info, CHANGELOGs, etc.)
+- removed CVS Log headers
+- cleaned up formatting/indentation in numerous places
+- fixed vigilante version of PlayerName/SafePlayerName bug
+- now use FindBin to locate vigilante (and new RDTJ:: libs)
+
+date: 2001/09/21 04:27:50;  author: roundeye
+- fixed: /index.php URLS -> index.php (patch submitted by Ryan Drake <ryan@mediaone.net>)
+- fixed: tables.sql queue table now includes 'player' column (patch submitted by Ryan Drake <ryan@mediaone.net>)
+- jukebox_player.pl: minor tweaks to random song routine (variable rename, added sleep 1) --
+  this is only a temporary fix until tomorrow :-)
+
+date: 2001/08/11 18:44:09;  author: roundeye
+- jukebox_player.pl: Added support for random songs when playlist(s) empty
+- index.php: toggle switch for same
+- index.php: added total music time to request list display (useful for making cassette
+  tapes, e.g.)
+
+date: 2001/07/20 22:24:44;  author: roundeye
+- jukebox_player.pl: er.  I mean fixed the previous bug (infinite quote escaping)
+
+date: 2001/07/20 22:19:09;  author: roundeye
+- jukebox_player.pl: fixed "infinite quote-escaping" bug when player gets disconnected
+
+date: 2001/01/09 11:21:08;  author: roundeye
+- jukebox_player.pl: now support migration of requests from one player to another :-)
+
+date: 2001/01/08 13:46:03;  author: roundeye
+- jukebox_player.pl: shitheaded bug with jukebox<->vigilante interaction
+
+date: 2001/01/08 13:23:21;  author: roundeye
+- jukebox_player.pl: front-end now supports multiple jukeboxes
+
+date: 2001/01/08 11:55:50;  author: roundeye
+- update_rdtj now starts jukebox properly
+
+date: 2001/01/08 11:54:35;  author: roundeye
+- jukebox_player.pl: Player message now updating
+
+date: 2001/01/08 11:47:53;  author: roundeye
+- jukebox_player.pl: backend now supports multiple queues
+
+date: 2001/01/08 11:02:11;  author: roundeye
+- index.php is showing up modified, but a diff shows nothing; presumably this
+  is a timestamp/clock issue
+- moved upgrades/tables_1.1-1.2.sql to upgrades/tables_0.1-0.2.sql, which is
+  what it should have been called in the first place
+- added upgrades/tables_0.2,0.3-0.4.sql to allow migration between 0.[23] and 0.4
+  which will include multi-player support
+
+date: 2001/01/08 10:54:05;  author: roundeye
+- added "force artist" and "force album" commands to add script
+
+date: 2000/11/02 14:41:07;  author: roundeye
+- tiny interface usability change -- when submitting songs, keep the
+  proper expansion (artist expanded / album expanded) but on reload jump
+  to the album from the submitted song (reduces scrolling for multi-album
+  artists)
+
+date: 2000/11/01 13:00:23;  author: roundeye
+- wired 'add' up to the database
+- added code to only add mp3's which are not already in the database.
+
+date: 2000/10/24 13:26:18;  author: roundeye
+- major work on "add" script to add mp3's to database
+
+date: 2000/10/23 08:51:13;  author: roundeye
+- add: adding more heuristics for name lookups
+- add: added ability to search eastcore music database
+
+
+date: 2000/10/16 20:48:50;  author: roundeye
+- adds: adding heuristics: put in most common english words and
+  english single-letter frequency data
+- add: working on cleanup/final heuristics
+
+date: 2000/10/16 19:59:39;  author: roundeye
+- add: incomplete first check-in of heuristic mp3 insertion tool
+
+[ RDTJ 0.3 released ]
+
+date: 2000/10/16 13:33:46;  author: roundeye
+- insert_album: fixed minor bug with insert_album:  it was intended to 
+  be run for one album at a time, but it turns out that it works *almost* perfectly for
+  multiple albums at once (perl insert_albums list1 list2 list3 ...)
+  except for the fact that the album sort order field doesn't reset on
+  album boundaries.  Sort order is still correct but instead of each album
+  having tracks numbered 1, 2, 3... they continue on upwards.
+
+date: 2000/10/16 13:06:43;  author: roundeye
+- add update_rdtj, a little utility script to update rdtj 
+  from CVS and restart player
+
+date: 2000/10/16 12:37:33;  author: roundeye
+- made 'ps' search more robust (was failing in some circumstances)
+
+date: 2000/10/16 12:34:08;  author: roundeye
+- jukebox_player.pl: added clean error page for db down situations
+- jukebox_player.pl: workarounds for a couple of very annoying bugs in old mysql's
+- jukebox_player.pl: uniform wording for hide/show links
+
+[ RDTJ 0.2 released ]
+
+date: 2000/10/15 15:22:39;  author: roundeye
+- code review
+- comment cleanup
+- tweaked some logic/UI facets
+
+date: 2000/10/15 13:20:24;  author: roundeye
+- documentation bug ("Getopts::Long" should have been "Getopt::Long")
+- fixed bad song list bug when admin off (introduced after -0.3 during
+  db optimization spree)
+
+date: 2000/10/15 10:37:51;  author: roundeye
+- bugfix since I broke the player stop/start commands when I added the
+  time until play code
+
+date: 2000/10/15 09:53:23;  author: roundeye
+- added real-time "time remaining" to player status area
+- added real-time "should play in" times to request list
+
+date: 2000/10/15 08:59:55;  author: roundeye
+- added vigilante -- companion to jukebox_player which can hunt and kill
+  active mpg123 instances
+- added code to use vigilante to implement "skip track" and "pause immediately"
+  player controls
+- updated player controls interface; player status code
+
+date: 2000/10/15 06:44:45;  author: roundeye
+- fixed bug with display of songs/song admin for last album in list (if I tell
+  you "while loop" can you guess what the stupid bug was?)
+- added mysql_free_result()'s where I had forgotten them earlier
+- optimized song list queries to make the song list *fast* as snake snot
+  (really makes a difference on collections > 100 albums)
+
+date: 2000/10/14 13:28:27;  author: roundeye
+- added player controls
+- added collapsible song list
+- added auto-refresh capabilities
+- some formatting; testing; bugfixes; odds and ends
+
+date: 2000/10/14 10:52:03;  author: roundeye
+- finished administration code (including artist, album, and song administration)
+- navigated the quagmire that is php's "magic quotes"/"addslashes"/"-v.-&quot; nightmare
+
+date: 2000/10/14 07:57:52;  author: roundeye
+- added page footer pointing to sourceforge repository
+- factored out configuration variables from front-end
+- reorganized display of tracks in various places
+- made track display components optional
+- added artist administration code
+- added general admin password
+- added "close" links on requests and greatest hits areas
+- new colored region for current song; reformatted current song display
+- factored out readable_time code into a function
+- added 1x1 transparent gif to html for display prettification
+
+date: 2000/10/13 13:38:59;  author: roundeye
+- added script to upgrade tables to rdtj-0.2 for 
+  rdtj-0.1 users.
+  use: mysql -uuser -p -hhost mp3 < tables_1.1-1.2.sql
+
+date: 2000/10/13 13:37:47;  author: roundeye
+  Minor bugfixes; major code cleanup streamlining and commenting
+- mass-kill on request lists
+- IP address tracking and display;
+- "Greatest hits" list and all the wholesome goodness therein;
+- "play an entire album" feature
+- display of playing and requested songs in songs list
+- command-line args/usage/etc. in backend
+- verbose mode for mpg123
+- many more backend options/configs
+- fixed backend to allow tracking greatest hits
+- logging to stdout by default
+- added '-' filehandle
+- support for remote host db's on backend
+- updated README documentation to track new features
+- upgrade directory in CVS
+- updated queue table to store IP's
+- added upgrade script from 0.1->0.2
+- pretty colors
+- yada yada yada
+
+[ RDTJ 0.1 released ]
+
+date: 2000/10/13 10:23:23;  author: roundeye
+- command-line args processing for Perl scripts
+- override of defaults
+- commenting
+- code cleanup
+- basic sanity checking
+- now requires Getopts::Long (!)
+
+date: 2000/10/13 02:40:20;  author: roundeye
+- added README (first attempt at documentation)
+- split out html header/footer into separate files
+- formatting cleanup, additional commenting
+
+date: 2000/10/12 09:28:46;  author: roundeye
+- First attempt at basic installation docs and a little bit about the program.
+
+date: 2000/10/12 07:32:07;  author: roundeye
+- Initial commit of rdtj source
+
+

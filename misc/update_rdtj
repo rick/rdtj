@@ -1,0 +1,6 @@
+cd ..
+cvs update
+ps -flaxwww | egrep -e "/usr/bin/mpg123|jukebox_player|vigilante"| grep -v egrep | awk '{print $3}' | xargs kill -9
+chmod +x jukebox_player.pl
+chmod +x vigilante.pl
+perl ./jukebox_player.pl -n jukebox -m "default jukebox" &

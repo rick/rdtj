@@ -1,0 +1,749 @@
+Getting Started with RDTJ (Roundeye's Duct-Tape Jukebox)
+
+by Rick Bradley (roundeye@roundeye.net / rick@eastcore.net)
+Sep. 26, 2001
+
+$Header: /cvsroot/rdtj/rdtj/README,v 1.6 2001/09/27 05:53:18 roundeye Exp $
+
+
+
+  * * * * * * * * * * UPGRADE NOTICE * * * * * * * * * * * * * * * * * * * 
+
+  NOTE -- if you're upgrading from 0.2 or 0.3 to 0.4 you need to non-destructively
+  modify a database table.  After unpacking, feed the upgrade SQL file into
+  your database, for example:
+
+  % mysql -uuser -p -hhost mp3 < ~/rdtj-0.4/upgrades/tables_0.2,0.3-0.4.sql
+
+  NOTE -- if you're upgrading from 0.1 you need to first non-destructively
+  modify a database table.  After unpacking, feed the upgrade SQL file into
+  your database, for example:
+
+  % mysql -uuser -p -hhost mp3 < ~/rdtj-0.3/upgrades/tables_0.1-0.2.sql
+
+  Then follow the above instructions on upgrading from 0.2 or 0.3 to 0.4.
+
+  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+  
+
+
+
+About RDTJ
+
+	"Roundeye's Duct-Tape Jukebox" is a web-based MP3 jukebox system.
+	I wrote it prior to a party I was holding when I wanted to allow
+	people to choose songs to play on the stereo without having to
+	worry about whether they were too drunk to operate it...  I have a
+	decent portion of my CD collection ripped to MP3 files which are
+	organized by artist and album and browsing by artist and/or album
+	seemed a really natural way to go about things.  The idea that
+	partygoers (and later anyone over at the house and even others out
+	on the web) could use a web browser to pick songs to play really
+	appealed to me: no worries about whether the stereo would end up
+	with beer in it, people don't have to wait around holding a CD
+	while other songs finish, and since I have a bunch of computers
+	around the house people don't need to go to another room to play a
+	song.
+
+	Since then some friends have installed the software and we have
+	fun playing songs on each others stereos (even though some of us
+	are states apart).  While I don't necessarily recommend making
+	your stereo accessible from the WWW, using a firewall or an
+	htaccess access control system to make it selectively available
+	can make for some fun.
+
+
+	The homepage for RDTJ is at http://rdtj.sourceforge.net
+
+
+
+I - Getting the source
+
+	There are currently two ways to get RDTJ:  HTTP download and CVS checkout.
+
+
+					    HTTP download
+
+
+	RDTJ is being hosted by SourceForge (a part of the Open Source
+    Development Network - OSDN) which provides free hosting and
+    development services for Open Source software (like RDTJ).  They
+    offer HTTP (web) access to file repositories.
+
+	To retrieve RDTJ version 0.4 via HTTP:
+
+	Point a web browser at this address and save the resulting file:
+
+		http://prdownloads.sourceforge.net/rdtj/rdtj-0.4.tar.gz
+		   
+
+      		
+						CVS checkout
+
+
+	If you have CVS installed you can check out the CVS source from
+	Sourceforge via their CVS pserver.
+
+	To check out the RDTJ CVS tree via pserver:
+
+		% cvs -d:pserver:anonymous@cvs.rdtj.sourceforge.net:/cvsroot/rdtj login 
+
+	[ when prompted for a password for "anonymous" simply press the Enter key ]
+                   
+        % cvs -z3 -d:pserver:anonymous@cvs.rdtj.sourceforge.net:/cvsroot/rdtj co rdtj
+
+
+
+
+II - Prerequisites
+
+	The RDTJ software is being developed on Linux, but will most
+	likely work on a wide range of *nix systems (FreeBSD, OpenBSD,
+	NetBSD, SunOS/Solaris, OSX, etc.) as long as they can run the
+	necessary underlying packages.  While the front-end should run
+	anywhere PHP (w/ MySQL support) runs, the back-end relies on
+	Perl's fork() call to allow for real-time song skipping and hence
+	won't run on Windows.
+
+	You will need a number of packages to make the RDTJ software work
+	properly:
+
+	- a database (MySQL is the only one supported at the moment).  
+
+		Currently you'll need MySQL installed somewhere on your
+		network and the permissions set to allow the web server to
+		perform selects, inserts, updates, and deletes on a database
+		named "mp3".
+
+	- a PHP-enabled WWW server.  
+
+		I developed the code using Apache 1.3.*.  I had mod_php3
+		compiled in and had MySQL support compiled into PHP3.  The
+		system works fine (and is even faster) under PHP4.
+
+        In future releases we will not guarantee PHP3 support.
+
+	- Perl with the following non-standard module dependencies:
+
+       ?  RDTJ component      Perl modules needed
+       ----------------------------------------------------------------------
+       M  jukebox_player.pl   DBI, DBD::mysql
+       O  insert_album        MP3::Info
+       O  add                 MP3::Info, LWP::Simple, Algorithm::Diff,
+                              DBI, DBD::mysql       
+
+       ? -> 'M' denotes mandatory components, 'O' denotes optional components
+
+		I am using Perl 5.6.1 for development, but you can probably
+		get away with most Perl releases > 5.004 (and in a pinch you
+		might be able to go back further).
+
+	- a command-line MP3 player.
+
+		I use mpg123 (http://www.mpg123.de/).  It's slick, sturdy, and
+		does the job.  You could probably find a number of other
+		players which will fit the bill.  Currently if you change
+		players you may need to do minor code hacking in
+		jukebox_player.pl.  This hassle should be alleviated in a
+		future release.
+
+	- a system with sound support which can play mp3's.
+
+		I took a laptop with a line out jack, hooked up some RCA
+		cables into the back of my stereo (the AUX jack for those who
+		must know) and when the laptop plays so does the stereo.
+
+
+III - Installing.
+
+	You can install the system on one machine (which is probably the
+	easiest way to go for starters) or spread the components over
+	different machines.  For the sake of the installation discussion
+	assume you have the following machines:
+
+		- dbserver   - a computer which is running MySQL
+		- wwwserver  - a computer running a PHP-enabled web server
+		- playserver - a computer with a sound card which will run the
+		               backend player and mpg123
+
+	Once you have the components listed above in place you need to
+	unpack and install RDTJ.
+
+	- Move the downloaded rdtj-0.4.tar.gz to a working directory.
+	- Unpack rdtj by issuing the command:
+
+		% tar xvfz rdtj-0.4.tar.gz
+		% cd rdtj-0.4/
+
+	- Create a directory in the wwwserver's web documents directory
+	for the rdtj php interface and copy the files in rdtj-0.4/html/
+	there:
+
+	% mkdir /home/httpd/html/rdtj/
+	% cp -a html/* /home/httpd/html/rdtj/
+
+	or:
+
+	% cp -a html/  /home/httpd/html/rdtj/
+
+	- update the front-end configuration
+
+	The front-end configuration is now much more flexible, more
+	centralized, and hopefully easier to understand.  The file 
+	rdtj-0.4/html/header.php contains the configuration options (as
+	well as the header for the web pages).  Here is how the
+	configuration section looks by default:
+
+
+    # ADMIN OPTIONS
+    $admin_pass		= "pass";		# password for administrative functions
+									# (should be md5+database eventually)
+    $admin_allow_song	= 1;		# allow admin to modify song details?
+    $admin_allow_album  = 1;		# allow admin to modify album details?
+    $admin_allow_artist = 1;		# allow admin to modify artist details?
+
+    # DATABASE OPTIONS
+
+    $dbhost = "host";				# which host is the database server?
+    $dbuser = "user";				# which user should connect to the db?
+    $dbpass = "password";			# what is the db user's password?
+    $dbname = "mp3";				# what is the name of the database?
+
+    # COLORS
+    $color_page		= "#f2f2d0";	# background color for page
+    $color_request	= "#f9fce8";	# background color for requests area
+    $color_status	= "#71b8f2";	# background color for current song area
+    $color_controls	= "#a2d2f2";	# background color for player controls
+    $color_hits		= "#bffce6";	# background color for hits area
+    $color_songs	= "#a1f2f4";	# background color for collapsed song list
+    $color_text		= "#000000";	# default text color
+    $color_error_page	= "#f4f44b";	# background color for error sections
+    $color_error_msg	= "#f21515";	# background color for error messages
+
+    # STATUS OPTIONS
+    $status_title	= "Jukebox Status"; # headline to show above status area
+    $status_album	= 1;			# display album for current song?
+    $status_length	= 1;			# show song length for current song?
+    $status_show_IP	= 1;			# show IP for current song?
+    $status_play_line	= "Now playing:";    # "now playing" message text
+
+    # PLAYER CONTROL OPTIONS
+    $controls_on	= 1;			# enable player controls?
+    $controls_show_IP	= 1;		# show IP in player controls?
+    $controls_show_time = 1;		# show elapsed time in player controls?
+
+    # REQUEST OPTIONS
+    $request_title	= "Requests";	# headline to show above expanded requests
+    $request_album	= 1;			# display albums in request list?
+    $request_length	= 1;			# show track length in request list?
+    $request_show_IP	= 1;		# show IP's in request list?
+    $request_wait_time	= 1;		# show "requested xxx ago" info for requests?
+    $request_kill	= 1;			# display "kill" links in requests?
+    $request_close	= 1;			# "close" link on the expanded requests area?
+    $mass_murder	= 1;			# display mass-delete widgets in requests?
+
+    # HITS OPTIONS
+    $hits_title		= "Greatest Hits";  # headline to show above expanded hits
+    $hits_default	= 10;			# default number of hits to show initially
+    $hits_all		= 1000000;		# number of hits to request for "all hits"
+    $hits_close		= 1;			# "close" link on the expanded hits area?
+
+    # SONG LIST OPTIONS
+    $songs_title	= "";			# headline to show above song list
+
+    # MISC. OPTIONS
+    $refresh_on		= 1;			# should the page refresh?
+    $refresh_time	= 150;			# how many seconds before a refresh?
+    $refresh_time_small = 30;		# refresh time when song list is hidden
+
+
+
+	    You'll at least want to change $admin_pass to be a secret
+	    administrator password.  You'll also need to set $dbhost
+	    ("localhost" will probably work if you are running everything on
+	    one machine), $dbuser, and $dbpass.
+
+	    To enable administration you will also need to set
+	    $admin_allow_song, $admin_allow_album, and $admin_allow_artist
+	    to 1.
+
+
+	- Create the mp3 database and load the tables into it
+
+	% echo "create database mp3" | mysql -uusername -p -hdbserver 
+	% mysql -uusername -p -hdbserver < tables.sql
+
+
+	- Configure the Perl components
+
+	The Perl components of the RDTJ share a common configuration file
+    located at rdtj-0.4/RDTJ/Config.pm  You should edit this file's
+    settings to reflect your installation.  You will at least want
+    to update the database settings:
+
+	# database settings
+	$dbname = "DBI:mysql:mp3";
+	$dbuser = "user";
+	$dbpass = "password";
+
+	To connect on another host you'll want to use something like:
+
+	$dbname = "DBI:mysql:mp3@dbserver:port";
+
+	There is additionally a log file which is created by jukebox_player.pl.
+	By default the output goes to the standard output (stdout) which is
+	specified by '-'.  If you want to log to a file then set $logfile
+	to point to where you want your logfile to live.  The player will
+	close the log file, time stamp it, and open a new one if you send it
+	a HUP signal.
+
+
+	- Load up your mp3 data into the database
+
+	This is currently the most "duct-tape-ish" part of the
+	installation (you knew the name must have come from somewhere,
+	right?).  Fortunately it's also the area I'm most excited
+    about improving in the next release.  Unfortunately, this
+    isn't the next release.
+
+    Currently there are two options:
+
+    1) There's a script called "insert_album" in the distribution
+    which will take a playlist file and generate the necessary MySQL
+    "INSERT" statements to load an album's information into the
+    database.
+
+		For example:
+
+		The playlist file: /media/mp3/Foo/Bar/__playlist lists, in
+		order, the names of the files which make up the album "Bar"
+		by the artist "Foo":
+
+			/media/mp3/Foo/Bar/Baz.mp3
+			/media/mp3/Foo/Bar/Fnord.mp3
+			/media/mp3/Foo/Bar/Hack.mp3
+			/media/mp3/Foo/Bar/Crack.mp3
+			/media/mp3/Foo/Bar/Sleep.mp3
+			/media/mp3/Foo/Bar/Food.mp3
+			/media/mp3/Foo/Bar/Caffeine.mp3
+
+		Passing it through "insert_album":
+
+			% cat /media/mp3/Foo/Bar/__playlist | perl insert_album
+			INSERT INTO songs (title, artist, album, length, albumposition, filename) VALUES ('Baz', 'Foo', 'Bar', 234, 1, '/media/mp3/Foo/Bar/Baz.mp3');
+			INSERT INTO songs (title, artist, album, length, albumposition, filename) VALUES ('Fnord', 'Foo', 'Bar', 123, 2, '/media/mp3/Foo/Bar/Fnord.mp3');
+			INSERT INTO songs (title, artist, album, length, albumposition, filename) VALUES ('Hack', 'Foo', 'Bar', 409, 3, '/media/mp3/Foo/Bar/Hack.mp3');
+			INSERT INTO songs (title, artist, album, length, albumposition, filename) VALUES ('Crack', 'Foo', 'Bar', 42, 4, '/media/mp3/Foo/Bar/Crack.mp3');
+			INSERT INTO songs (title, artist, album, length, albumposition, filename) VALUES ('Sleep', 'Foo', 'Bar', 101, 5, '/media/mp3/Foo/Bar/Sleep.mp3');
+			INSERT INTO songs (title, artist, album, length, albumposition, filename) VALUES ('Food', 'Foo', 'Bar', 81, 6, '/media/mp3/Foo/Bar/Food.mp3');
+			INSERT INTO songs (title, artist, album, length, albumposition, filename) VALUES ('Caffeine', 'Foo', 'Bar', 181, 7, '/media/mp3/Foo/Bar/Caffeine.mp3');
+
+		The way I use it at home is to say (beware of line wrap):
+
+		% find /mnt/mp3 -type f -name '__playlist' | xargs -i{} perl insert_album {} | mysql -uusername -p -hdbserver mp3
+
+		Which inserts all the album info into the database in one big scoop.
+
+	2) There is a new script called "add" in the distribution which
+	uses an inordinate amount of duct-tape and a bit of hoodoo to try
+    to automate the process of updating your album database.
+
+
+		Usage:  ./add [options]
+
+		Version (CVS revision #) Revision: 1.7  last updated Date: 2001/09/23 19:54:41 .
+
+		RDTJ - Roundeye's duct-tape jukebox.  This is the mp3 insert
+		script.  Point at a directory and it will attempt to determine
+		artist/album/song mappings for mp3's located under that directory.
+		It uses some voodoo and plenty of duct-tape to try to figure out
+		what the mp3 files are, and how to organize them.  Of course, 
+		a single directory with 100 mp3 files named 1.mp3, 2.mp3, ... 
+		with no id3 tag information is likely to be unworkable.
+
+    		General options
+
+		    -h, -?, --help              Display this message
+		    -v, --version               Output version info and exit
+		    -d, --debug                 Turn on debugging (default = off)
+		    -P, --password password	    Password for offsite search facility
+		    -p, --path path		    	Starting directory
+		    -a, --artist artist		    Force artist name
+		    -A, --album	album		    Force album name
+
+
+	If you aren't connected to the Internet the script will use
+	directory names, file names, and id tags in your mp3 files to try
+    to determine the artists, albums, and song titles for the mp3's 
+    in a directory.
+
+	If you ARE connected to the Internet the script will use a web
+    database to attempt to get the correct names for albums, artists, 
+    and songs, and to put them into the proper album order.  Note
+    that the --password argument to "add" currently defaults to 
+    the appropriate password for the web database.
+
+    Regardless, once "add" decides on a set of names it will update
+    your database to include them.  Note that it won't insert the
+    same mp3 file twice so it's not a problem if you run "add" over
+    the same directory multiple times (it won't insert a record for
+    a file whose complete path is already in the database...).
+
+    The "add" script recursively descends a directory tree looking
+    for mp3's.  
+
+	CAVEATS:
+
+        - the online database is almost 1 year out of date
+        - the replacement, which should be kept up-to-date 
+          will probably not exist for a few months
+        - "add" is chock full of heuristics so it may not
+          always give spectacular results
+        - "add" works best when the path specified includes
+          a couple of levels of enclosing directories (it
+          uses these names when they are available):
+
+          % perl add -p ./Carrot_Top/Rocks/
+
+        - Running "add" at the top of a 200Gb directory tree
+          is going to take a long time, and probably wasn't
+          what you intended.  Instead of:
+
+          % perl add -p /
+
+          Maybe you could do:
+
+          % perl add -p /mnt/mp3
+
+
+
+	- Put the player in place
+
+	If you're running the player on a separate machine, copy
+	jukebox_player.pl *and* the RDTJ/ directory to the place where you
+	want it to live:
+
+	% cp jukebox_player.pl /home/me/rdtj/jukebox_player.pl
+    % cp -a RDTJ /home/me/rdtj/RDTJ/
+
+	- Starting the player
+
+	The player runs well in the background.  Simply launch it like:
+
+	% perl jukebox_player.pl -n jukebox -m "Living Room"
+
+	Each invocation of the player should use a different name (-n),
+    and ideally a different message (-m) though that's not required.
+	I usually background the player, but the syntax and behavior
+    varies depending upon which shell you use:
+
+	% perl jukebox_player.pl -n jukebox -m "Living Room" &
+
+
+	Command line player usage.
+
+	The player supports command-line flags for many configuration
+	options.
+
+
+		Usage:  ./jukebox_player.pl -n playername [options]
+
+		Version (CVS revision #) Revision: 1.18  last updated Date: 2001/09/27 01:52:09 .
+
+		RDTJ - Roundeye's duct-tape jukebox.  This is the back-end player
+		script.  Install on a machine with a sound card (that hopefully has
+		access to your directories of mp3's, *and* has access to your database).
+		This program will connect to the database, and repeatedly pick the next
+		song from the queue, play it, and update the queue.
+
+		    General options
+
+
+		    -n, --name			            Name of this player (queue name on front-end)
+		    -m, --message		            Player description message
+		    -h, -?, --help                  Display this message
+		    -v, --version                   Output version info and exit
+		    -d, --debug                     Turn on debugging (default = off)
+    		-l file, --logfile file         Set log file to 'file'
+		                                    (use '-' for stdout)
+		    --nolog                         Disable logging
+
+		    --dbsleep seconds               # seconds to sleep if database down
+		    --qsleep  seconds               # seconds to sleep on empty queue
+		    --ps                            location of 'ps' binary
+
+		    Database options
+
+		    --db     name                   Name of database to connect to
+		    --dbhost hostname               Hostname to use for database connection
+		    --dbport port                   Port number to use for database connection
+		    --dbuser username               Username to use for database connection
+		    --dbpass password               Password to use for database connection
+		                                     (warning:  this is visible to 'ps'!)
+		    Player options
+    
+		    -p path, --player path          Path to command-line mp3 player
+		                                    (default = /usr/bin/mpg123)
+		    -b size, --buffer size          Player buffer size in kilobytes
+		                                    (default = 1024)
+	
+
+
+IV -  Using the system
+
+
+	Point a web browser at the interface.  The URL will be something like:
+
+		   	http://wwwserver/rdtj/
+
+
+	When the page loads up there are five (5) distinct areas:
+
+
+	    Request Area
+
+	In this area the request list is displayed and maintained.
+	If there are no songs requested this area will say so, and
+	there will be no links in this area.  Go down to the Song
+	List Area (see below) to add songs to the playlist.
+
+	When there are requests queued up for playing you will see a line
+	which says "# songs in request list".  Clicking on the "request
+	list" link will expand the request list.
+
+	Once the request list is expanded you will see a line for each
+	song in the request list.  The song that will play next will be at
+	the top and later songs will be towards the bottom.  The exact
+	information displayed is configurable in
+	rdtj-<version>/html/header.php.
+
+	An example request list line looks like:
+
+        1. [x] (kill) "Tupelo" [3:06] by Barnyard Pimp from Nashville Babylon
+           plays in 2:35 (requested 11:04 ago from home.roundeye.net) 5:41 total
+
+	This is track #1 (the next track to play), there is a checkbox (more on
+	that later), a link to "kill" this entry, the song title
+	("Tupelo"), the length of the song, the artist ("Barnyard Pimp"),
+	the album ("Nashville Babylon"), the time until the song plays
+	(2:35), how long the song has been in the queue (11:04), the
+	IP address or hostname of the requester (home.roundeye.net), and
+	the total amount of music (including any remaining time in the 
+    currently playing song).
+
+	Clicking the "kill" link will remove this song from the request
+	queue, refresh the page, and bring you back to the expanded
+	request list (assuming there are still songs in it).
+
+	The checkboxes can be used to select a group of songs to "kill"
+	(as if you clicked the "kill" link for each of the selected
+	songs).  Select the songs you wish to kill, and press the button
+	below the request list which says "Kill selected".  Mass murder.
+
+    The "total" music time information was added to facilitate
+    creating "mix tapes", where you usually know how much time you
+    have available and wish to fit as much good music in that time as
+    possible.
+
+	If you have multiple players active you will see a "move songs
+	to..." link at the bottom left of the Request Area.  Clicking
+    this link will remove all the songs currently in the request
+    list and append them to the end of the request list of the
+    named player (as of now the currently playing song doesn't
+    migrate with them, mostly because it's unclear how to cleanly
+    handle the common situation where the destination player is
+    already playing a song).
+
+
+	    Current Song Area
+
+	When a song is playing you will see it listed at the left of this
+	area along with some basic track information.  The exact information
+	displayed is configurable in rdtj-0.4/html/header.php and mirrors
+    the information displayed in the Request Area.
+
+
+	    Player Control Area
+
+	This is the area to the right of the Current Song Area.  This area
+	can be disabled in rdtj-0.4/html/header.php.  For the time 
+	being there are only two player states:  'playing' and 'paused'.  
+	The current player state will be shown here, as well as a link
+	which will allow you to change the state of the player (actually
+    you can stop the player after the song playing has finished or
+    stop it immediately).  If the player is 'paused' then information
+    will be shown about how long the player has been paused and who
+    paused it.  The exact information displayed is configurable in
+    rdtj-<version>/html/header.php.
+
+    The "Turn random songs on/off" link provides access to a "shuffle"
+    mechanism.  When random songs are turned on, whenever there are no
+    songs in the player's request list a song is picked at random from
+    the entire known collection.  Simple, and good for those times
+    when you're sick of picking songs.
+
+	If you are running multiple players you may see "go to ..." links
+    at the bottom of the Player Control Area.  Clicking one of these
+    links will bring you to the Player Control Area for the named
+    player.
+   
+
+
+	    Greatest Hits Area
+
+	Just beneath the Status/Request Area is the "Greatest Hits" Area.
+	Usually this just contains a single line with the text "View Greatest
+	Hits List" with most of that being a single link.
+
+	Clicking the link will expand the Greatest Hits Area.  Once this area
+	is expanded you will see another list of songs.  This list ranks the
+	most popular songs on the jukebox in order (with the first song being
+	the most popular).  A typical greatest hits line would look like:
+
+	1. (235) By And By by Barnyard Pimp from Nashville Babylon
+
+	This song is the most popular on this particular jukebox (mine) since
+	it starts with "1.".  The next number "(235)" is the number of times
+	this song has been played.  Then comes the title ("By and By"), the
+	artist ("Barnyard Pimp") and the album ("Nashville Babylon").  Roundeye
+	likes him some BYP.
+
+	The greatest hits area will only list a limited number of hits at
+	first (mine's set to 25 right now).  If the number of hits exceeds
+	this number you will see links to allow you to expand the hits list:
+
+	View Greatest hits up to: 50 hits, all
+
+	Clicking either the "50" or the "all" link will expand the hits
+	list further.  If you click "50" you'll obviously see up to 50 hits.
+	If you have more than 50 hits in your jukebox then you'll see another
+	set of links (most likely for "100", and definitely for "all").
+	Clicking "all" expands the hit list to its full length, which may
+	well include every song on your jukebox.  Caveat clickor.
+
+
+	    Song List Area
+
+	The Song List Area is where you view your collection and select
+	songs (and albums) for play through the jukebox.  Initially you 
+	will see a list of Artists, and below them their albums.  "Where
+	are the songs?" you ask?  Just pretend you did, damnit.
+
+	Click on the name of an album.  When you do the page refreshes and
+	the album expands to list the songs on that album.
+
+	Click on the name of an artist.  When you do the page refreshes and
+	all of the albums for that artist expand to show their songs.
+
+	Here's an example of an expanded album listing:
+
+	
+          !Barnyard Pimp 
+          
+              Nashville Babylon 
+          
+                ![4:49] Blue Mazda
+                 [5:19] Bob Denver Pee-Wee Herman Blues
+                 [2:00] Magellan
+                 [3:06] Tupelo
+                 [3:32] Piety 1
+                 [7:37] Union
+                 [1:51] Piety 2 [playing]
+                 [4:07] By And By [requested]
+          
+                 (play entire album) 
+          
+        First we have the Artist ("Barnyard Pimp"), then beneath that the 
+	album ("Nashville Babylon").  Below that is a line for each song
+	listing the track length (4 minutes, 49 seconds for "Blue Mazda")
+	and the title.  If the track is currently playing it will say 
+	"[playing]" next to it.  If it is in the request queue it will
+	say "[requested]" next to it.
+
+	Clicking a song name will enter that song into the request list
+	as the last song on the list.  When the page refreshes you'll 
+	still be on the album you had expanded (so's you can keep on 
+	loadin' up them tunes).
+
+	At the bottom of the album's song listing is a link which says
+	"play entire album".  Want to venture a guess what that does?
+	Now you know why there's a "mass murder" feature up in the
+	Status/Request Area. :-)
+
+	
+	What about those little "!"'s in the artist and album listings?
+	Well, I'm glad you asked.
+
+	When those are visible (when the administration options are 
+	turned on in rdtj-0.4/html/header.php) they are links
+	which will bring up an administration interface for an artist,
+	an album, or the songs on an album.
+
+	Clicking on an artist's name will cause an '!' to appear next
+	to the artist's name (in addition to expanding all the artist's
+	albums).  Clicking that link will bring up a two field form.
+	The first field should contain the artist's name.  Changing
+	the artist's name in this field will change it in the database,
+	provided you enter the correct administrator password
+	(also set in rdtj-0.4/html/header.php) in the second
+	of the two fields, and then click the "change" button.
+	
+	Clicking on an album's name will cause an '!' to appear next
+	to the album's name (in addition to expanding the album).  
+	Clicking that link will bring up a two field form.
+	The first field should contain the album's name.  Changing
+	the album's name in this field will change it in the database,
+	provided you enter the correct administrator password
+	(also set in rdtj-0.4/html/header.php) in the second
+	of the two fields, and then click the "change" button.
+	
+	Clicking on the '!' link next to the first song in an album
+	will turn that album's song listing into a form where you 
+	can modify the database information for each song on the
+	album.
+
+	There are 5 fields for each song in this form:
+
+	'#'   - The position on the album of this song.  This determines
+		the order in which songs appear in the album listing, 
+		and also the order in which songs enter the request list
+		when you click the  "play entire album" link.
+
+	'Title' - This is the title of the song as it appears in the 
+		  album listing.  Nothing more, nothing less.
+
+	'Artist' - This is the name of the artist who performs this song.
+		   This field determines which artist the song appears under
+		   in the artist/album listings.  If you change this the song
+		   will appear somewhere else in the listing.  If you're trying
+		   to change a misspeld artist name for an album you'd be
+		   better off clicking the '!' link next to the artist's name
+		   and doing it there.
+
+	'Album'  - This is the name of the album on which this song appears.
+		   Very similar to the 'Artist' field in how it works.  You
+		   can move a song to another album by changing this field.
+		   Again, if you want to change an album name that's incorrect
+		   you'd probably do better with the '!' link by the album
+		   name.
+
+	'File' - This is the filename of the mp3 file which gets played when
+		 you click the link for this song to put it in the request
+		 list.  If it's wrong the song won't play.  Simple enough?
+
+	As with the artist and album administration areas there is an admin
+	password field that you must enter correctly, and press the "change"
+	button, to have your changes take effect.
+
+
+	Refresh
+
+	There are configuration options in rdtj-0.4/html/header.php
+	which enable refreshes (browsers which support this will automatically
+	reload the page after a certain period of time).  If you have refresh
+	turned on, be aware that (1) refreshes do not happen when you have an
+	admin form in front of you, (2) when the song list is shown the
+	$refresh_time config variable is used (generally the idea is to set
+	this to a longer time period to reduce load on the web server), and
+	(3) when the song list is hidden the $refresh_time_small config
+	variable is used.

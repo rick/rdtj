@@ -1,0 +1,63 @@
+#!/usr/bin/perl -w
+
+use MP3::Info;
+
+#
+# Playlist filter for rdtj (Roundeye's duct-tape jukebox)
+#
+# takes a list of songs in playlist format (one per line :-)
+# outputs the necessary insert statements to put them in db
+#
+# Rick Bradley - roundeye@roundeye.net / rick@eastcore.net
+#
+# please consult LICENSE file for license information
+# CHANGELOG lists history and additional contributor information
+# 
+
+#
+# $Header: /cvsroot/rdtj/rdtj/insert_album,v 1.3 2001/09/23 19:54:41 roundeye Exp $
+#
+
+$prevalbum = '';
+while (<>)
+{
+	chomp;
+	# split up path
+	s:^/[abcd]/:/media/:;	# unify playlist dirs
+	$filename = $_;
+
+	s:_: :g;				# change _'s to spaces
+
+	# parse the filename
+	m:/media/mp3/([^/]*)/([^/]*)/(.*).mp3:
+	or do {
+		warn "couldn't parse filename $filename\n";
+		next;
+	};
+	$artist = $1;
+	$album = $2;
+	$title = $3;
+
+	if ($prevalbum ne $album)
+	{   # reset numbering on new album - for those who just pump in 
+	    # all albums :-)
+	    $albumsort = 0;
+	    $prevalbum = $album;
+	}
+
+	# update track order (per album)
+	$albumsort++;
+
+	# compute the length for this track
+	$info = get_mp3info($filename);
+	$time = $info->{'MM'} * 60 + $info->{'SS'};
+
+	$title =~ s/'/\\'/g;
+	$artist =~ s/'/\\'/g;
+	$album =~ s/'/\\'/g;
+	$filename =~ s/'/\\'/g;
+
+	print "INSERT INTO songs (title, artist, album, length, albumposition, filename) VALUES (".
+		"'$title', '$artist', '$album', $time, $albumsort, '$filename');\n"
+} 
+

@@ -1,0 +1,1089 @@
+#!/usr/bin/perl 
+
+#
+#   add
+#      RDTJ (roundeye's duct-tape jukebox) utility to add mp3's to 
+#      the RDTJ database.
+#
+#   Rick Bradley - roundeye@roundeye.net / rick@eastcore.net
+#
+#   Please consult the LICENSE file for license information
+#   CHANGELOG lists history and additional contributor information
+#
+
+#
+#   $Header: /cvsroot/rdtj/rdtj/add,v 1.7 2001/09/23 19:54:41 roundeye Exp $
+#
+
+use strict;			    # enforce some discipline
+use Getopt::Long;		    # command-line argument processing
+use FindBin;			    # locate this binary
+use lib "$FindBin::Bin";	    # use local libraries
+use RDTJ::Config;		    # use RDTJ configuration settings
+
+use MP3::Info;			    # to read id3 tags from mp3's
+use LWP::Simple;		    # for tracking down titles on the web :-0
+use Algorithm::Diff qw(LCS);	    # for finding best matches between strings
+use DBI;                    # generic database connection
+use DBD::mysql;             # mysql specific drivers
+
+# declare our variables
+use vars qw($dbname $dbuser $dbpass $force_album $force_artist $DEBUG $dir $password);
+
+# perform command-line processing 
+process_cmdline();
+
+# other vars
+use vars qw(
+	    @common %common %freq @comb
+	    @dir_pieces
+	    $songs  $known $recalcitrant
+	    $dep $album 
+	    $total $good $hit
+	    );
+
+
+# set up miscellany for heuristics
+# changes:  @common, %common, %freq, @comb
+init_heuristic_data();
+
+
+# factor out directory components in $dir in case they're needed
+@dir_pieces = reverse (split(/\//, $dir));
+print STDERR "dir_pieces:  @dir_pieces\n" if $DEBUG;
+
+
+# find the mp3's, organize, and get id3 tags where available
+print STDERR "gathering mp3 files\n" if $DEBUG;
+$songs = gather_mp3s($dir, \@dir_pieces);
+
+
+#  Now we should have a tree structure containing all the
+#  directories containing mp3's, organized by depth, and
+#  organized by directory.  Mp3 filenames are in the leaves.
+
+# it is wise to save memory since I've become aware of the sheer
+# magnitude of some users' collections... so we iterate per album.
+
+$total=0;
+foreach $dep (@{$songs})
+{   # process each depth layer in order
+    foreach $album (@{$dep})
+    {	# process each album at a given depth
+
+	$total++;
+	# use off-site web repository to track down artist/album/song info
+	print "Rectifying album $album->{'path'}/$album->{'dir'}\n";
+	($known, $recalcitrant, $hit) = get_music_names($dir, $album, $password, \@dir_pieces);	    
+print "done\n";
+	$good += $hit;
+
+	# for remainder of albums, try to come up with good titles
+	# (there will always be mp3's which are not in a music database...
+	#   God Bless America).
+	$known = set_recalcitrant_names($known, $recalcitrant);  
+
+	# update the rdtj database with new mp3's 
+	insert_albums($known);
+    }
+}
+
+print "good = $good, miss = ".($total-$good).", %hit = ".sprintf("%3.1f", 100*($good/$total))."%\n"; 
+
+#
+#
+#   SUBROUTINES
+#
+#
+
+# set @common, %common, %freq, @comb  (nasty at-a-distance stuff)
+sub init_heuristic_data
+{
+    # initialize ordered list of 250 most common English words
+    @common = qw(the of to and a in is it you that he was for on are with as i his they 
+		 be at one have this from or had by hot word but what some we can out 
+		 other were all there when up use your how said an each she which do 
+		 their time if will way about many then them write would like so these 
+		 her long make thing see him two has look more day could go come did 
+		 number sound no most people my over know water than call first who may
+		 down side been now find any new work part take get place made live where
+		 after back little only round man year came show every good me give our
+		 under name very through just form sentence great think say help low line
+		 differ turn cause much mean before move right boy old too same tell does
+		 set three want air well also play small end put home read hand port 
+		 large spell add even land here must big high such follow act why ask 
+		 men change went light kind off need house picture try us again animal
+		 point mother world near build self earth father head stand own page 
+		 should country found answer school grow study still learn plant cover
+		 food sun four between state keep eye never last let thought city tree 
+		 cross farm hard start might story saw far sea draw left late run dont 
+		 while press close night real life few north);
+
+    # music-related hack words
+    push (@common, qw(
+		      disc disk volume set 1 2 ii iii iv v rem various misc somebody unknown someone
+		     ));
+	     
+    # and sling them into a hash (entries are position #'s for each word (key))
+    @common{@common}=(1..scalar(@common));
+
+    # initialize hash of English letter frequencies
+    %freq = ('a' => 0.077709, 'b' => 0.017519, 'c' => 0.035334, 'd' => 0.035613,
+	     'e' => 0.120851, 'f' => 0.021424, 'g' => 0.021412, 'h' => 0.038254,
+	     'i' => 0.069067, 'j' => 0.001812, 'k' => 0.009219, 'l' => 0.040636,
+	     'm' => 0.029796, 'n' => 0.071334, 'o' => 0.079650, 'p' => 0.028511,
+	     'q' => 0.001377, 'r' => 0.065782, 's' => 0.067621, 't' => 0.084624,
+	     'u' => 0.032536, 'v' => 0.011119, 'w' => 0.014006, 'x' => 0.005841,
+	     'y' => 0.017453, 'z' => 0.001486);
+
+    # pascal's triangle :-)
+    @comb = (
+	     [ 1,   1    ],
+	     [ 1,   2,   1    ],
+	     [ 1,   3,   3,   1     ],
+	     [ 1,   4,   6,   4,    1     ],
+	     [ 1,   5,  10,  10,    5,    1     ],
+	     [ 1,   6,  15,  20,   15,    6,    1     ],
+	     [ 1,   7,  21,  35,   35,   21,    7,    1     ],
+	     [ 1,   8,  28,  56,   70,   56,   28,    8,    1     ],
+	     [ 1,   9,  36,  84,  126,  126,   84,   36,    9,    1     ],
+	     [ 1,  10,  45, 120,  210,  252,  210,  120,   45,   10,    1    ],
+	     [ 1,  11,  55, 165,  330,  462,  462,  330,  165,   55,   11,   1   ],
+	     [ 1,  12,  66, 220,  495,  792,  924,  792,  495,  220,   66,  12,  1,  ],
+	     [ 1,  13,  78, 286,  715, 1287, 1716, 1716, 1287,  715,  286,  78, 13,  1   ],
+	     [ 1,  14,  91, 364, 1001, 2002, 3003, 3432, 3003, 2002, 1001, 364, 91, 14,  1  ]
+	    );
+}
+
+# find all mp3's beneath $dir
+sub gather_mp3s
+{
+    my ($dir, $dir_pieces) = @_;
+    my @songs = ();		    # array of hashes of mp3 paths at each depth
+    my @dirs  = ('');		    # directory stack
+
+    my ($depth, @entries, $entry, $current_dir, $need_album, $album_number);
+    my ($id3_artist, $id3_album, $id3_title, $album_pnt, $songs_pnt, $last_dir);
+    my ($pre_path, $guess, $forget_id3_album, $forget_id3_artist, @guess1);
+    my (@guess2, @lcs, $order);
+
+    $dir =~ s:/+$::;	    # trim any trailing '/'(s) from root dir
+
+DIR:
+    while (@dirs)
+    {   # do a breadth-first-search of the directory tree rooted at $dir
+
+	# get the next directory to be processed
+	$current_dir = pop(@dirs);
+
+	# store last directory component of current_dir, and leading path
+	$current_dir =~ m:^(^.*/)?([^/]+)$:;
+	$pre_path    = $1 || '';
+	$last_dir    = $2 || '';
+	$pre_path    =~ s:/+$::;	# get rid of any trailing '/'s
+	$last_dir    =~ s:/+$::;	# get rid of any trailing '/'s
+
+	# how deeply nested is this directory?
+	$depth	     = ($current_dir =~ s:/:/:g) || 0;
+	print STDERR "depth= $depth\n" if $DEBUG;
+
+	# and try to open it
+	opendir(DIR, "$dir$current_dir") or 
+	    do
+	    {	# couldn't open this directory, skip
+		warn "$0: couldn't read directory [$dir/$current_dir]\n" if $DEBUG;
+		next DIR;
+	    };
+
+	print STDERR "current: [$dir]$current_dir\n" if $DEBUG;
+
+	# suck in the directory entries
+	@entries     = readdir(DIR);
+	close(DIR);
+
+	# set flag for creation of a new album sub-tree
+	$need_album  = 1;
+
+	# split them out into mp3 files and more subdirectories
+	foreach $entry (@entries)
+	{
+	    next if $entry =~ /^\.\.?$/;	# skip . & .. 
+
+	    if (-d "$dir$current_dir/$entry")
+	    {   # another subdirectory, put it on the stack
+		push (@dirs, "$current_dir/$entry");
+		print STDERR "found directory [$dir]$current_dir/$entry\n" if $DEBUG;
+		next;
+	    }
+
+	    if ($entry =~ /\.mp3$/ and -f "$dir$current_dir/$entry" 
+		and !-l "$dir$current_dir/$entry")
+	    {   # an mp3 file (yes, I'm an optimist)
+
+		# may need list of dir. hashes at this depth
+		$songs[$depth] ||= [];
+
+		if ($need_album)
+		{   # need to make a new album entry
+		    $album_number = scalar(@{$songs[$depth]});	    # find new album slot #
+		    $songs[$depth]->[$album_number] = {};	    # an album entry
+		    $album_pnt = $songs[$depth]->[$album_number];   # shorthand for this album
+		    $album_pnt->{'songs'} = [];			    # list of songs on album
+		    $songs_pnt  = $album_pnt->{'songs'};	    # shorthand for songs on this album
+		    $album_pnt->{'path'}  = $pre_path;		    # store album enclosing path
+		    $album_pnt->{'dir'}   = $last_dir;		    # store album dir. name
+
+		    # make a guess for the album name
+		    if ($last_dir)
+		    {	# use the current directory name
+			$album_pnt->{'album_guess'} = $last_dir;
+		    }
+		    elsif ($pre_path =~ m:([^/]+)$: )
+		    {	# use closest enclosing directory
+			$album_pnt->{'album_guess'} = $1;
+		    }
+		    elsif ($dir_pieces->[0])
+		    {	# really use closest enclosing directory
+			$album_pnt->{'album_guess'} = $dir_pieces->[0];
+		    }
+		    else
+		    {	# we are SHIT out of luck
+			$album_pnt->{'album_guess'} = '';
+		    }
+
+		    # save in case we back out an id3 guess later...
+		    $album_pnt->{'orig_album_guess'} = $album_pnt->{'album_guess'};
+
+		    $need_album = $forget_id3_artist = $forget_id3_album = 0;
+		    $order = 0;					    
+		}
+
+		# increment nonsensical playlist order for this song (will be fixed elsewhere)
+		$order++;
+
+		# get id3 tag info for this mp3 if present
+		($id3_artist, $id3_album, $id3_title) = get_id3_tags("$dir$current_dir/$entry");
+
+		# prefer id3 tag if present for title guesses
+		$guess = $id3_title ? $id3_title : $entry;
+		
+		# store the filename and subdir of this mp3 (later will come more goodies)
+		push (@{$songs_pnt}, 
+		    { 
+			"file"		=> $entry ,	    # the filename
+			"id_artist"	=> $id3_artist,	    # artist id3 tag
+			"id_album"	=> $id3_album,	    # album id3 tag
+			"id_title"	=> $id3_title,	    # title id3 tag
+			"title_guess"	=> $guess,	    # title to use for guessing
+			"order"		=> $order,	    # nonsense playlist order
+		    });
+
+		if ($id3_album and !$forget_id3_album)
+		{   # can we use the album id3_tag to help name the album?
+		    if (exists($album_pnt->{'id_album'}))
+		    {	# we've made a guess already, was it a good one?
+			if (get_LCS_similarity(normalize_guess($album_pnt->{'id_album'}), 
+					       normalize_guess($id3_album)) < 0.6)
+			{   # bad guess, id3 tag doesn't help us much
+			    delete $album_pnt->{'id_album'};
+			    # revert to original guess for album name
+			    $album_pnt->{'album_guess'} = $album_pnt->{'orig_album_guess'};
+			}
+			$forget_id3_album = 1;		    # just roll with it
+		    }
+		    else
+		    {	# use this as the new guess... probably checked later
+			$album_pnt->{'id_album'} = $id3_album;
+			$album_pnt->{'album_guess'} = $id3_album;
+		    }
+		}
+
+		if ($id3_artist and !$forget_id3_artist)
+		{   # can we use the album id3_tag to help name the artist?
+		    if (exists($album_pnt->{'id_artist'}))
+		    {	# we've made a guess already, was it a good one?
+			if (get_LCS_similarity(normalize_guess($album_pnt->{'id_artist'}), 
+					       normalize_guess($id3_artist)) < 0.6)
+			{   # bad guess id3 tag doesn't help us much
+			    delete $album_pnt->{'id_artist'};
+			    # will need to compute a better artist guess
+			    delete $album_pnt->{'artist_guess'};
+			}
+			$forget_id3_artist = 1;		    # just roll with it
+		    }
+		    else
+		    {	# use this as the new guess... probably checked later
+			$album_pnt->{'id_artist'} = $id3_artist;
+			$album_pnt->{'artist_guess'} = $id3_artist;
+		    }
+		}
+		print STDERR "found mp3 [$dir]$current_dir/$entry\n" if $DEBUG;
+	    }
+	}
+    }
+    \@songs;	# return the songs array
+}
+
+
+
+# assign names to albums/artists/songs using offsite web music database if possible
+sub get_music_names
+{
+    my ($dir, $album, $password, $dir_pieces) = @_;
+
+    my ($cur_depth, $miss, $good, $known, $recalcitrant);
+    my ($title_seed, %album_info, $artist_album_normal, $similarity);
+    my ($page, $suspect_title, $suspect_artist, $suspect_tracks, $score);
+    my ($best_score, $match, $best_match, $comparison_title, $tmp, $matches);
+    my ($song, $count);
+
+    $known = []; $recalcitrant = [];
+
+    $miss = $good = 0;
+
+    # get normalized song titles, and search strings based on songs
+    $title_seed =  seed_title_guesses($album);
+    print STDERR "title seed:  $title_seed\n" if $DEBUG;
+
+    # store title guess with album
+    $album->{'title_guess'} = $title_seed;
+
+    # compute artist guess if necessary
+    if (!exists($album->{'artist_guess'}))
+    {	# id3 tags didn't help, so try the enclosing directory if there is one
+	$tmp = $album->{'path'};
+	if ($tmp =~ m:([^/]+)$: )
+	{   # we can try the enclosing directory
+	    $album->{'artist_guess'} = $1;
+	}
+	elsif ($dir_pieces->[0])
+	{   # maybe we can still try the enclosing directory
+	    $album->{'artist_guess'} = $dir_pieces->[0];
+	}
+	else
+	{   # we are SHIT out of luck.
+	    $album->{'artist_guess'} = '';
+	}
+    }
+
+    # generate search info from the album and artist guesses
+    $artist_album_normal = strip_common(normalize_guess(join(' ', 
+		    ($album->{'artist_guess'}, $album->{'album_guess'}), 1)));
+    $artist_album_normal = strip_large_small($artist_album_normal);
+
+    # and merge with search info from the title guesses
+    $title_seed .= '+'.join('+', split(/ /, $artist_album_normal));
+
+    # clean up extraneous '+'s
+    $title_seed =~ s/\++/\+/g;
+    $title_seed =~ s/^\+//;
+    $title_seed =~ s/\+$//;
+
+    print STDERR "search = $title_seed\n" if $DEBUG;
+
+    # get list of possible matches from offsite database
+    $matches = get_web_matches($title_seed, $artist_album_normal, $password);
+
+    $count = 0;
+    # construct list of track title guesses and ordering for this album
+    $album->{'title_guesses'} = 
+	[
+	map { +{
+		'guess' => normalize_guess($_->{'title_guess'}),
+		'order' => $count++,
+	    } } 
+		@{$album->{'songs'}}
+    ];
+
+    if (!scalar(@{$matches}))
+    {	# couldn't find this album on the web
+	print "No hits for $title_seed\n" if $DEBUG;
+	$miss++;
+
+    # save this guy to the recalcitrant list for cleanup
+	push (@{$recalcitrant}, $album);
+    }
+    else
+    {	# found match(es), now see which is the best...
+	$best_score = 0;
+	$best_match = '';
+
+	foreach $match (@{$matches})
+	{   # test each potential match for suitability
+	    $score = test_album_match($album, $match);
+	    if ($score > $best_score)
+	    {	# a better match than we had before
+		$best_score = $score;
+		$best_match = $match;
+	    }
+	}
+	# how'd we do?
+	if ($best_score > 0.5)
+	{   # we have a winner
+
+	    # update album title
+	    $album->{'final_album'} = $best_match->{'album'};
+
+	    # update artist name
+	    $album->{'final_artist'} = $best_match->{'artist'};
+
+	    $count = 0; 
+	    # update song titles and orders
+	    foreach $song (@{$best_match->{'order'}})
+	    {	# move order/title info over from corresponding match song
+		$album->{'songs'}->[$song]->{'final_order'} = $count;
+		$album->{'songs'}->[$song]->{'final_title'} = $best_match->{'titles'}->[$count];
+		$count++;
+	    }
+
+	    # and sort the album's songs by the matched order
+	    $album->{'songs'} = 
+		[ sort { $a->{'final_order'} <=> $b->{'final_order'} } 
+		    @{$album->{'songs'}} ];
+			
+	    # count it
+	    $good++;    
+
+	    # save to the "known" list
+	    push (@{$known}, $album);
+
+	    print "artist/title  guess=[$album->{artist_guess} / $album->{album_guess}] -> ".
+		    "[$album->{'final_artist'} / $album->{'final_album'}]\n";
+	}
+	else
+	{   # shit.
+	    $miss++;
+
+	    print "no matches for $title_seed (best score = $best_score)\n" if $DEBUG;
+
+	    # save this guy to the recalcitrant list for cleanup
+	    push(@{$recalcitrant}, $album);
+	}
+    }
+    # statistics on web search "success"
+    ($known, $recalcitrant, $good);
+}
+
+
+# compute a (bullshit really) "suitability" between a web search match
+# and an album.  Provide a track ordering for the tracks on this album
+sub test_album_match
+{
+    my ($album, $match) = @_;
+
+    my ($list_size_factor, $list_factor, $album_factor, $artist_factor);
+    my ($num_match_songs, $num_album_songs, $min, $max, @a, @m, $count);
+    my ($short, $long, $current, @mlen, $curlen, $list_good, $i, @mark);
+    my ($best, $best_pos, $sim, $song, @missed);
+
+    return 0 unless 
+	(defined $match and defined $match->{'titles'});
+    
+    # compute no. tracks for each
+    $num_match_songs = scalar(@{$match->{'titles'}});
+    $num_album_songs = scalar(@{$album->{'songs'}});
+
+    # get the min & max of the pair
+    $min = ($num_match_songs <= $num_album_songs) ? $num_match_songs : $num_album_songs;
+    $max = ($num_match_songs > $num_album_songs)  ? $num_match_songs : $num_album_songs;
+
+    # compute track list numbering similarity
+    $list_size_factor = 1 - (($max - $min) / ($max));
+
+    # figure out whether track lists are even of comparable size
+    if ($list_size_factor >= 0.80)
+    {	# ok, we'll call it close enough
+	# compare tracks and try to match titles
+
+	#note:  comparing brute force is:
+	#	O(a**2 * lcs)
+	#       comparing with successive elimination is:
+	#	O(a**2 * lcs)
+	#	sorting with local compares is:
+	#	O(|a|log|a| + |a| * lcs) with good length distributions
+	#	worst case is still O(a**2 * lcs).
+
+	# sort album title guesses by guess length
+	@a = sort 
+	    { length($a->{'guess'}) <=> length($b->{'guess'}) } 
+		@{$album->{'title_guesses'}};
+
+	$count = 0;
+	# sort match titles by length (save ordering as well)
+	@m = sort
+	    { length($a->{'guess'}) <=> length($b->{'guess'}) } 
+		map { +{ "guess" => $_, "order" => $count++ } } 
+		    @{$match->{'titles'}};
+
+	# generate a lookup table of lengths of match titles
+	@mlen = map { length($_->{'guess'}) } @m;
+	# clear "used" markers
+	@mark = (0) x scalar(@m);
+
+	$short = $long = $list_good = 0;
+	# traverse lists in sloppy lockstep, looking for matches
+	foreach $current (@a)
+	{   # consider matches for this album
+	    print STDERR "current_order- = ".($current->{'order'}-1)."\n" if $DEBUG;
+	    print STDERR "guess = $current->{guess}\n" if $DEBUG;
+	    $curlen = length($current->{'guess'});
+
+	    while (($short < scalar(@m)) and ($mlen[$short] < 0.6*$curlen))
+	    {	# position short end of lookup window
+		$short++;
+	    }
+	    # hit the end of the line, no more matches!
+	    last if ($short == scalar(@m));
+
+	    while (($long < scalar(@m)) and ($mlen[$long] < 1.4*$curlen))
+	    {	# position long end of lookup window
+		$long++;
+	    }
+	    # adjust for boundary condition
+	    $long = ($long > scalar(@m)) ? scalar(@m) : $long;
+
+	    $best = 0; undef $best_pos;
+
+	    for ($i = $short; $i < $long; $i++)
+	    {	# compare titles
+		next if $mark[$i];  # skip if match already used
+		# compare album guess with match title
+		$sim = get_LCS_similarity(normalize_guess($current->{'guess'}), 
+					  normalize_guess($m[$i]->{'guess'}));
+
+
+		if ($sim > $best)
+		{   # found a better match than before, save it
+		    print "".sprintf("%0.3f", $sim)." -- $current->{guess} : $m[$i]->{guess}\n" if $DEBUG;
+		    $best = $sim;
+		    $best_pos = $i;
+		}
+	    }
+	    if (defined $best_pos)
+	    {
+		if ($best > 0.5)
+		{   # it's a keeper, by my arbitrary metric
+		    $mark[$best_pos] = 1;	# mark it
+		    $list_good++;		# count it
+						# save it
+		    $match->{'order'} ||= [];
+		    $match->{'order'}->[$m[$best_pos]->{'order'}] =
+			$current->{'order'};
+		    $current->{'matched'} = 1;
+		}
+	    }
+	}
+
+	if (!exists($match->{'order'}))
+	{
+	    $match->{'order'} = [ map {$_->{'order'}} @a  ]; 
+	}
+
+	# compute the % of matches for titles
+	$list_factor = 1-(2*(scalar(@{$album->{'title_guesses'}})-$list_good) / scalar(@{$album->{'title_guesses'}}));
+	print "\n" if $DEBUG;
+    }
+    else
+    {	# not even worth bothering
+	$list_factor = 0;
+	$match->{'order'} = [ map {$_->{'order'}} @a  ]; 
+    }
+
+    # patch up holes in ordering for unmatched songs
+    @missed = grep { !exists($_->{'matched'})} @a;
+    if (scalar(@missed))
+    {	# yep, some songs were left out
+	# |album| <=> |match| ....
+	$i = 0;
+	$match->{'order'} ||= [];
+	foreach $song (@missed)
+	{	# put them in empty slots
+	print "missed song $song->{guess}\n";
+	    while ($mark[$i] and $i < scalar(@{$match->{'order'}})) 
+	    {   # find a slot 
+		$i++ 
+	    }
+
+	    # put this song in the slot
+	    if ($i < scalar(@m))
+	    {   # |album| <= |match|
+		$match->{'order'}->[$m[$i]->{'order'}] =
+		    $song->{'order'};
+		$mark[$i] = 1;
+
+		if (get_LCS_similarity(normalize_guess($m[$i]->{'guess'}),
+			    normalize_guess($song->{'guess'})) < 0.5)
+		{   # override title if too far apart
+		    $m[$i]->{'guess'} = $song->{'guess'};
+		    $match->{'titles'}->[$i] = $song->{'guess'};
+		    print "guess = $song->{guess}\n";
+		}
+		# otherwise, let it be
+	    }
+	    else
+	    {   # |album| > |match|
+		# just add slots in the match :-)
+		$match->{'order'}->[$i] = $song->{'order'};
+		$m[$i] ||= {};
+		$m[$i]->{'guess'} = $song->{'guess'};
+		$match->{'titles'}->[$i] = $song->{'guess'};
+		print "";
+	    }
+	}
+    }
+
+    # compute album name factor
+    $album_factor = get_LCS_similarity(normalize_guess($album->{'album_guess'}), 
+				       normalize_guess($match->{'album'}));
+
+    # compute artist name factor
+    $artist_factor = get_LCS_similarity(normalize_guess($album->{'artist_guess'}), 
+					normalize_guess($match->{'artist'}));
+
+    # failsafe
+    $list_size_factor	||= 0;
+    $list_factor	||= 0;
+
+    # compute an (arbitrary) overall suitability for the match
+    ($artist_factor + 3*$album_factor + 5*$list_size_factor + 7*$list_factor) / (1+3+5+7);
+}
+
+# get potential matches for artist/album/titles from web search engine
+sub get_web_matches
+{
+    my ($search, $alternate, $password) = @_;
+
+    my ($page, $suspect_tracks, $suspect_artist, $suspect_album, $pass_str); 
+    my ($matches, $URL, @tracks, $track, $count);
+
+    # initialize results array
+    $matches = [];
+
+    # add in password to search URL
+    $pass_str = $password ? "&password=$password" : '';
+
+    # specify search request URL
+    $URL= 'http://ecmusic.eastcore.net/coreSearch.php3?search=';
+
+    # submit the search and retrieve the results
+    $page = get ($URL.$search.$pass_str);
+
+
+    if ($page !~ /<!-- A -->/)
+    {
+	print STDERR "No hits for $search\n";
+	if ($alternate)
+	{   # try a more limited search
+	    return get_web_matches($alternate, '', $password);
+	}
+    }
+    else
+    {
+	$count = 0;
+	while ($page =~ m%<!-- A -->%)
+	{   # loop over all possible hits
+	    $matches->[$count] = {};
+
+	    # find artist 
+	    if ($page =~ /<!-- T -->(.*)<!-- t -->/)
+	    {
+		$suspect_artist = $1;
+		# knock out artist info
+		$page =~ s/<!-- T -->.*<!-- t -->//;
+
+		# store album name
+		$matches->[$count]->{'artist'} = $suspect_artist
+	    }
+
+	    # find album 
+	    if ($page =~ /<!-- A -->(.*)<!-- a -->/)
+	    {
+		$suspect_album = $1;
+		# knock out album info
+		$page =~ s/<!-- A -->.*<!-- a -->//;
+
+		# store album name
+		$matches->[$count]->{'album'} = $suspect_album
+	    }
+
+	    # find tracks 
+	    if ($page =~ /<!-- S -->(.*)<!-- E -->/)
+	    {
+		$suspect_tracks = $1;
+		# knock out track list
+		$page =~ s/<!-- S -->.*<!-- E -->//;
+
+		# store track titles in order of appearance
+		$matches->[$count]->{'titles'} = [split(/<br>/i, $suspect_tracks)];
+	    }
+	    $count++;
+	}
+    }
+    $matches;
+}
+
+# compute a "similarity" between 2 strings using LCS
+# similarity returned is a float between 0 and 1
+sub get_LCS_similarity
+{
+    my ($string1, $string2) = @_;
+    my (@str1, @str2, @lcs);
+
+    @str1 = split('', $string1);
+    @str2 = split('', $string2);
+    @lcs  = LCS(\@str1, \@str2);
+
+    # return similarity (between 0 and 1)
+    scalar(@lcs) / (length($string2)||1);
+}
+
+# set fail-safe artist/album/song names for stubborn albums
+sub set_recalcitrant_names
+{
+    my ($known, $stubborn) = @_;
+    my ($album, $song, $count);
+
+    foreach $album (@{$stubborn})
+    {	
+	$album->{'final_artist'} = $album->{'artist_guess'};
+	$album->{'final_album'} = $album->{'album_guess'};
+
+	$count = 0;
+	foreach $song (@{$album->{'songs'}})
+	{
+	    $count++;
+	    $song->{'final_title'} = $song->{'title_guess'};
+	    $song->{'final_order'} = $count;
+	}
+	# save it as a known good album
+	push (@{$known}, $album);
+    }
+    # return the updated list of all albums
+    $known;
+}
+
+# insert albums into database
+sub insert_albums
+{
+    my $albums = shift;
+    my ($album, $song, $count, $file, $printed, $info, $time);
+    my ($db, $check_query, $ins_query, $check_handle, $ins_handle);
+
+    # connect to database
+    $db = DBI->connect ($dbname, $dbuser, $dbpass);
+    die "$0:  Could not connect to database $dbname as user $dbuser.\n" unless $db;
+
+    # prepare query for detecting already-entered songs
+    $check_query = "select songid from songs where filename=?";
+
+    $check_handle = $db->prepare($check_query) or
+	die "$0:  Could not prepare SQL query [$check_query] (".$db->errstr.")\n";
+
+    # prepare query for inserting new songs
+    $ins_query	 = "insert into songs (title, album, artist, length, albumposition, filename) values (?, ?, ?, ?, ?, ?)";
+
+    $ins_handle = $db->prepare($ins_query) or
+	die "$0:  Could not prepare SQL query [$ins_query] (".$db->errstr.")\n";
+
+    foreach $album (@{$albums})
+    {
+	$count = 0;
+	$printed = 0;	    # printed an album title yet?
+	foreach $song (@{$album->{'songs'}})
+	{
+	    $count++;
+	    $file = "$dir/$album->{path}/$album->{dir}/$song->{file}";
+	    $file =~ s:/+:/:g;	    # strip multiple '/'s
+
+	    $check_handle->execute($file) or 
+		die "$0:  couldn't execute query ($check_query): ".($check_handle->errstr)."\n";
+
+	    if (!$check_handle->fetchrow_hashref)
+	    {	# this song is not already in the database
+
+		# compute the length for this track
+		$info = get_mp3info($file);
+		$time = $info->{'MM'} * 60 + $info->{'SS'};
+
+		if (!$printed)
+		{
+		    print "artist = $album->{'final_artist'}\n";
+		    print "album  = $album->{'final_album'}\n";
+		    $printed = 1;
+		}
+		print "	    $count - $song->{'final_title'} : $file\n";
+
+		$album->{'final_album'} = $::force_album if defined $::force_album;
+		$album->{'final_artist'} = $::force_artist if defined $::force_artist;
+		
+		$ins_handle->execute(
+			$song->{'final_title'}, 
+			$album->{'final_album'},
+			$album->{'final_artist'},
+			$time,
+			$count,
+			$file);
+	    }
+	}
+    }
+
+    # clean up
+    $ins_handle->finish();
+    $check_handle->finish();
+    $db->disconnect();
+}
+
+# get rid of common words
+sub strip_common
+{
+    return(join(' ', map { ($common{$_} or /[0-9]/) ? '' : $_ } split(/ /, shift)));
+}
+
+
+
+# get rid of large and small words
+sub strip_large_small
+{
+    return(join(' ', map { (length($_)>12 or length($_)<3) ? '' : $_ } split(/ /, shift)));
+}
+
+
+
+sub seed_title_guesses
+{
+    my $album = shift;	    # album is a hash reference :-)
+    my (%words, $song, $normalized, $word, %prob, @sorted, $key);
+
+    # construct pieces for title guessing/searching
+    foreach $song (@{$album->{'songs'}})
+    {
+	# get normalized title from filename
+	$normalized = normalize_guess($song->{'title_guess'});
+	$normalized = strip_common($normalized);
+	$song->{'normalized_guess'} = $normalized;
+
+	# tally counts of uncommon words in normalized title 
+	map { $words{$_}++ } 
+	    (grep { not defined ($common{$_}) } 
+		(split(' ', $normalized)));
+	print "$normalized\n" if $DEBUG;
+    }
+
+    # get letter distribution-based probabilities for word
+    #TODO:  currently discarding word repeat counts ($words{$word})
+    map { $prob{$_} = probability_string($_); } (keys %words);
+
+    # pick the top (lowest probability) few words
+    @sorted = sort { $prob{$a} <=> $prob{$b}; } keys %prob;
+
+    return '' unless scalar(@sorted);
+    return (defined $sorted[4] ? join('+', @sorted[0..4]) : '');
+}
+
+
+
+# use MP3::Info to extract any ID3 tags from the songs on an album
+sub get_id3_tags
+{
+    my $file = shift;	    # filename to search for tags
+    my ($tag, $id_artist, $id_album, $id_title);
+
+    # initialize tags to failure results
+    $id_artist = $id_album = $id_title = '';
+
+    if (-r $file)
+    {	# get the tags
+	print "Checking id3 tag for $file\n" if $DEBUG;	
+	$tag = get_mp3tag($file);
+	$id_artist  = $tag->{'ARTIST'} ? $tag->{'ARTIST'} : '' ;
+	$id_album   = $tag->{'ALBUM'}  ? $tag->{'ALBUM'}  : '' ;
+	$id_title   = $tag->{'TITLE'}  ? $tag->{'TITLE'}  : '' ;
+    }
+    else
+    {
+	print STDERR "...couldn't read $file for id tags.\n" if $DEBUG;
+    }
+
+    ($id_artist, $id_album, $id_title);
+}
+
+
+
+# compute a binomial distribution probability of the letter frequency
+# in a given string -- for finding "least likely" search words by
+# letter frequency
+sub probability_string
+{
+    my $str = shift;
+    my ($i, %letter_count, $letter, $product, $len, 
+        $p, $q, $p_exp, $q_exp, $factor, $prob, $combined);
+
+    # initialize word-total probability
+    $combined = 1;
+
+    # truncate string to enough character for our math
+    $str = substr($str, 0, scalar(@comb)) if (length($str) > scalar(@comb));
+    $len = length($str);
+
+    # tally the letter counts for the string
+    map { $letter_count{$_}++; } (split ('', $str));
+
+    foreach $letter (keys %letter_count)
+    {
+	print "$letter_count{$letter} ${letter}'s in $str\n" if $DEBUG;
+	print "$freq{$letter} is ${letter}'s frequency\n" if $DEBUG;
+
+	# compute p and ~p coefficients
+	$p_exp = $letter_count{$letter};
+	$q_exp = $len - $p_exp;
+
+	# save the probabilities
+	$p = $freq{$letter};
+	if (not defined $p) { print STDERR "SHIT! $letter\n";}
+	$q = 1 - $p;
+
+	# we want to save precision, so multiply the component
+	# with the larger exponent combinatorial factor first
+	# well, kinda:
+	if (defined $comb[$len])
+	{
+	    $factor = $comb[$len]->[$p_exp] * 
+		(($p_exp > $q_exp) ? scalar($p_exp--, $p) : scalar($q_exp--, $q));
+
+	    # compute binomial probability 
+	    $prob = $factor * $p**$p_exp * $q**$q_exp;
+	    $combined *= $prob;
+	}
+    }
+    printf "%0.7f -- $str\n", $combined if $DEBUG;
+    $combined;
+}
+
+
+
+# take a noisy phrase and try to reduce it to something more reasonable for
+# matching/searching  (vague enough for ya?)
+sub normalize_guess
+{
+    my $phrase = shift;		    # the phrase to normalize
+    my $use_numbers = shift || 0;   # should we let numbers pass through?
+
+    $phrase = lc($phrase);	    # standardize on lower case
+    $phrase =~ s/\.mp3$//;	    # drop any mp3 suffix
+    $phrase =~ s/'//g;		    # contract contractions
+    $phrase =~ s/\.//g;		    # abbreviations are troublesome
+    if ($use_numbers)
+    {
+	$phrase =~ s/[^a-z0-9 ]/ /g;       # get rid of useless characters
+    }
+    else
+    {
+	$phrase =~ s/[^a-z ]/ /g;       # get rid of useless characters
+    }
+    $phrase =~ s/\s+/ /g;	    # get rid of extra whitespace
+    $phrase =~ s/^ //;		    # get rid of starting whitespace
+    $phrase =~ s/ $//;		    # get rid of ending whitespace
+
+    # compress implied contractions (fix "'"->"_"->" " translation)
+    $phrase =~ s/(\w+) ([tdsm]|ll|[rv]e) /$1$2 /g;
+    $phrase =~ s/(\w+) ([tdsm]|ll|[rv]e)$/$1$2/;
+
+    $phrase;
+}
+
+
+# handle command-line arguments, display usage, etc.
+sub process_cmdline
+{
+    my $prog = $0;                  # what's my name baby?
+    $prog =~ s:.*?([^/]+)$:$1:;     # just a little trim job
+
+    # allow CVS to keep track of versions and last updates :-)
+    my $version = '(CVS revision #) $Revision: 1.7 $';    $version    =~ s/\$//g;
+    my $lastupdate = '$Date: 2001/09/23 19:54:41 $';      $lastupdate =~ s/\$//g;
+
+    my $usage = <<EOU;
+Usage:  $0 [options]
+
+Version $version last updated $lastupdate.
+
+RDTJ - Roundeye's duct-tape jukebox.  This is the mp3 insert
+script.  Point at a directory and it will attempt to determine
+artist/album/song mappings for mp3's located under that directory.
+It uses some voodoo and plenty of duct-tape to try to figure out
+what the mp3 files are, and how to organize them.  Of course, 
+a single directory with 100 mp3 files named 1.mp3, 2.mp3, ... 
+with no id3 tag information is likely to be unworkable.
+
+    General options
+
+    -h, -?, --help                  Display this message
+    -v, --version                   Output version info and exit
+    -d, --debug                     Turn on debugging (default = off)
+    -P, --password password	    Password for offsite search facility
+    -p, --path path		    Starting directory
+    -a, --artist artist		    Force artist name
+    -A, --album	album		    Force album name
+
+                                    
+Homepage: http://rdtj.sourceforge.net
+Author:   Rick Bradley (roundeye\@roundeye.net / rick\@eastcore.net)
+
+EOU
+
+    # variables to store commandline args
+    my ($help, $ver, $debug, $path, $pass, $artist, $album);
+
+    # don't ignore case -- in case we want to differentiate between '-x'/'-X'
+    Getopt::Long::Configure('no_ignore_case');
+
+    # retrieve the command line options
+    GetOptions(
+               'help|h|?'       => \$help,
+               'version|v'      => \$ver,
+               'debug|d'        => \$debug,
+	       'path|p=s'	=> \$path,
+	       'password|P=s'	=> \$pass,
+	       'artist|a=s'	=> \$artist,
+	       'album|A=s'	=> \$album,
+    ) &&!$help &&!$ver or die $usage;
+
+    die $usage if $ver;
+
+    # set defaults
+    $dir	    = '.';				# default value for topmost directory to search
+    $password	    = 'ecdb';				# password needed(?) for off-site data repository
+
+    # get defaults from RDTJ configuration settings
+    $dbname	    = $RDTJ::Config::dbname;		# name of database to connect to
+    $dbuser	    = $RDTJ::Config::dbuser;		# database user name to use when connecting
+    $dbpass	    = $RDTJ::Config::dbpass;		# password for database user
+    $DEBUG	    = $RDTJ::Config::DEBUG;		# do debug-ish logging
+
+    # prepare for the inevitable
+    my $dieflag = 0;
+    my $dieerror = '';
+
+    # process command-line arguments
+    $DEBUG = $debug      if (defined $debug);       # set global DEBUG flag
+    $password = $pass    if (defined $pass);	    # set global $password
+    $force_artist = $artist if (defined $artist);   # override artist
+    $force_album  = $album  if (defined $album);    # override album
+
+    if (not defined $path)
+    {
+	$dieflag = 1;
+	$dieerror .= "--path argument is mandatory!\n";
+    }
+    $dir = $path if (defined $path);		    # set global $dir
+
+    if (!-d $path)
+    {   # the top-level directory isn't a directory!
+        $dieflag = 1;
+        $dieerror .= "--path [$path] is not a directory!\n";
+    }
+
+    # seasons don't fear the reaper
+    die "\n$dieerror\n$usage" if $dieflag;   
+}
+
